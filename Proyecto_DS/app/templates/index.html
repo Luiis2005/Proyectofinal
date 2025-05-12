@@ -1,8 +1,12 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<h1 class="text-center">Bienvenido al Catálogo de Revistas UNISON</h1>
-<p class="text-center">Explora revistas científicas por área, catálogo o búsqueda.</p>
-<p class="text-center">Utiliza el menú de navegación para acceder a las diferentes secciones.</p>
-<p class="text-center">¡Disfruta de tu visita!</p>
+<div class="container py-5">
+  <div class="text-center">
+    <h1 class="display-5 fw-bold">Bienvenido al Catálogo de Revistas UNISON</h1>
+    <p class="lead mt-3">Descubre una amplia colección de revistas científicas organizadas por área temática.</p>
+    <p class="mb-4">Explora nuestro catálogo, utiliza el buscador o navega por las secciones disponibles para encontrar publicaciones de tu interés.</p>
+    <a href="/areas" class="btn btn-primary btn-lg">Explorar Áreas</a>
+  </div>
+</div>
 {% endblock %}
