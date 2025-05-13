@@ -8,8 +8,8 @@ INSTRUCCIONES DE USO:
 4.Entrar a la pagina y poder encontrar todas las revistas
 
 Integrantes del equipo:
-Orrantia Urquidez Jorge Luis
-Borbon Nuñez Francisco Javier
+Orrantia Urquidez Jorge Luis,
+Borbon Nuñez Francisco Javier y
 Ruiz Grijalva Valeria 
 
 Se uso el asistente digital: ChatGPT
