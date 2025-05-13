@@ -12,4 +12,4 @@ Orrantia Urquidez Jorge Luis,
 Borbon Nuñez Francisco Javier y
 Ruiz Grijalva Valeria 
 
-Se uso el asistente digital: ChatGPT
+Se uso el asistente digital: ChatGPT.
