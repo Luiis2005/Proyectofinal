@@ -1,140 +1,137 @@
-import os
-import json
 import requests
-import time
 from bs4 import BeautifulSoup
-import unicodedata
-import difflib
-# Ruta donde guardaremos el archivo JSON final
-OUTPUT_JSON = "datos/json/catalogo_general.json"
-
-# --- FUNCIONES EXTRA ---
+from urllib.parse import urljoin
+import time
+import json
+import re
+import os
 
 def normalizar(texto):
-    if not texto:
-        return ''
-    texto = texto.lower().strip()
-    texto = unicodedata.normalize('NFKD', texto).encode('ascii', 'ignore').decode('utf-8')
-    return texto
+    return texto.lower().strip()
 
-def buscar_nombre_aproximado(lista, nombre_objetivo):
-    nombre_objetivo_norm = normalizar(nombre_objetivo)
-    lista_normalizada = [normalizar(nombre) for nombre in lista]
-    coincidencias = difflib.get_close_matches(nombre_objetivo_norm, lista_normalizada, n=1, cutoff=0.7)
-    if coincidencias:
-        idx = lista_normalizada.index(coincidencias[0])
-        return lista[idx]
-    return None
-# Tiempo entre solicitudes para no saturar el servidor
-DELAY_SEGUNDOS = 2
-
-def cargar_catalogo_original(ruta):
-    """ Cargar el catálogo de revistas original en JSON """
-    with open(ruta, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-def cargar_catalogo_scrapeado():
-    """ Cargar revistas ya scrapeadas si existe el archivo """
-    if os.path.exists(OUTPUT_JSON):
-        with open(OUTPUT_JSON, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    else:
-        return {}
-
-def guardar_catalogo_scrapeado(datos):
-    """ Guardar datos actualizados en el JSON """
-    with open(OUTPUT_JSON, 'w', encoding='utf-8') as f:
-        json.dump(datos, f, ensure_ascii=False, indent=4)
-
-from urllib.parse import urljoin
-
-def obtener_info_revista(nombre_revista):
+def obtener_info_revista(nombre_revista, catalogo_extraido):
     print(f"Buscando: {nombre_revista}")
     url_busqueda = f"https://www.scimagojr.com/journalsearch.php?q={nombre_revista.replace(' ', '+')}"
-    print(f"URL de búsqueda: {url_busqueda}")
+    headers = {'User-Agent': 'Mozilla/5.0'}
 
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-    }
+    try:
+        respuesta = requests.get(url_busqueda, headers=headers)
+        soup = BeautifulSoup(respuesta.text, 'html.parser')
 
-    # Buscar la revista
-    respuesta = requests.get(url_busqueda, headers=headers)
-    soup = BeautifulSoup(respuesta.text, 'html.parser')
+        link_tag = None
+        for a in soup.select('a[href^="journalsearch.php?q="]'):
+            span = a.find('span', class_='jrnlname')
+            if span and normalizar(span.text) == normalizar(nombre_revista):
+                link_tag = a
+                break
 
-    # Buscar el primer resultado (basado en cómo se ve la estructura actual)
-    link_tag = soup.select_one('a[href*="journalsearch.php?q="] span.jrnlname')
-    if not link_tag:
-        print(f"No encontrada: {nombre_revista}")
-        return None
+        if not link_tag:
+            print(f"No encontrada: {nombre_revista}")
+            return
 
-    link_href = link_tag.find_parent('a')['href']
-    link_revista = urljoin("https://www.scimagojr.com/", link_href)
-    print(f"Revista encontrada: {nombre_revista}")
-    print(f"URL revista: {link_revista}")
+        link_revista = urljoin("https://www.scimagojr.com/", link_tag['href'])
+        print(f"Revista encontrada en: {link_revista}")
 
-    # Acceder a la página específica de la revista
-    respuesta_revista = requests.get(link_revista, headers=headers)
-    soup_revista = BeautifulSoup(respuesta_revista.text, 'html.parser')
+        resp_revista = requests.get(link_revista, headers=headers)
+        soup_revista = BeautifulSoup(resp_revista.text, 'html.parser')
 
-    def extraer_contenido(label):
-        tag = soup_revista.find('div', string=label)
-        return tag.find_next('div').text.strip() if tag else "No disponible"
+        def extraer_dato_por_h2(etiqueta):
+            h2 = soup_revista.find('h2', string=etiqueta)
+            if h2:
+                p = h2.find_next_sibling('p')
+                return p.text.strip() if p else "No disponible"
+            return "No disponible"
 
-    def extraer_sitio_web():
-        btn = soup_revista.find('a', class_='btn btn-home-links')
-        return btn['href'] if btn else "No disponible"
+        def extraer_hindex():
+            h2 = soup_revista.find('h2', string="H-Index")
+            if h2:
+                p = h2.find_next_sibling('p', class_='hindexnumber')
+                return p.text.strip() if p else "No disponible"
+            return "No disponible"
 
-    def extraer_issn():
-        span = soup_revista.find('span', string='ISSN')
-        if span:
-            return span.find_next_sibling('span').text.strip()
-        return "No disponible"
+        def extraer_sitio_web():
+            link = soup_revista.find('a', class_='btn btn-home-links') or soup_revista.find('a', string='Homepage')
+            return link.get('href', 'No disponible') if link else "No disponible"
 
-    return {
-        'sitio_web': extraer_sitio_web(),
-        'h_index': extraer_contenido('H Index'),
-        'area_y_categoria': soup_revista.find('div', class_='subjectareas').text.strip() if soup_revista.find('div', class_='subjectareas') else "No disponible",
-        'publisher': extraer_contenido('Publisher'),
-        'issn': extraer_issn(),
-        'widget': soup_revista.find('iframe')['src'] if soup_revista.find('iframe') else "No disponible",
-        'tipo_publicacion': extraer_contenido('Type'),
-        'ultima_visita': time.strftime("%Y-%m-%d")
-    }
+        def extraer_widget():
+            widget_section = soup_revista.find('div', class_='widgetlegend')
+            if widget_section:
+                input_code = widget_section.find('input', {'id': 'embed_code'})
+                if input_code and 'value' in input_code.attrs:
+                    return input_code['value']
+                iframe = widget_section.find('iframe')
+                if iframe:
+                    return iframe.get('src', 'No disponible')
+            return "No disponible"
 
+        def extraer_areas():
+            seccion = soup_revista.find('h2', string="Subject Area and Category")
+            if not seccion:
+                return "No disponible"
+            ul = seccion.find_next('ul')
+            if ul:
+                return ' | '.join([li.text.strip() for li in ul.find_all('li')])
+            return "No disponible"
 
+        def extraer_tipo_publicacion():
+            for dt in soup_revista.find_all('dt'):
+                if 'publication type' in normalizar(dt.text):
+                    dd = dt.find_next_sibling('dd')
+                    if dd:
+                        return dd.get_text(strip=True)
+            for heading in soup_revista.find_all(['h2', 'h3']):
+                if 'publication type' in normalizar(heading.text):
+                    next_element = heading.find_next(['p', 'div', 'ul'])
+                    if next_element:
+                        return next_element.get_text(strip=True)
+            for li in soup_revista.find_all('li'):
+                if 'publication type' in normalizar(li.text):
+                    return li.get_text(strip=True).replace('Publication Type:', '').strip()
+            issn = extraer_dato_por_h2('ISSN')
+            if issn != "No disponible":
+                return "Journal"
+            return "No disponible"
 
-def scrappear_revistas():
-    """ Scrappear todas las revistas del catálogo """
-    catalogo = cargar_catalogo_original('datos/json/catalogo_general.json')  
-    revistas_scrapeadas = cargar_catalogo_scrapeado()
+        journal_data = {
+            'sitio_web': extraer_sitio_web(),
+            'h_index': extraer_hindex(),
+            'area_y_categoria': extraer_areas(),
+            'publisher': extraer_dato_por_h2('Publisher'),
+            'issn': extraer_dato_por_h2('ISSN'),
+            'widget': extraer_widget(),
+            'tipo_publicacion': extraer_tipo_publicacion(),
+            'ultima_visita': time.strftime("%Y-%m-%d")
+        }
 
-    for titulo in catalogo.keys():
-        titulo_lower = titulo.lower()
+        print(f"Datos extraídos: {journal_data}")
+        catalogo_extraido.append({nombre_revista: journal_data})
 
-        # Si ya existe en el JSON y fue visitado hace menos de 30 días, NO lo buscamos de nuevo
-        if titulo_lower in revistas_scrapeadas:
-            ultima_visita = revistas_scrapeadas[titulo_lower].get('ultima_visita')
-            # Si existe fecha, calculamos los días pasados desde la última visita
-            # Si no existe fecha, obligamos a volver a scrappear
-            if ultima_visita:
-                try:
-                    dias_pasados = (time.time() - time.mktime(time.strptime(ultima_visita, "%Y-%m-%d"))) / (60 * 60 * 24)
-                except ValueError:
-                    print(f"Fecha inválida para {titulo}, scrappeando de nuevo...")
-                    ultima_visita = None
-            else:
-                ultima_visita = None
-                dias_pasados = None
-        # Scrapear la revista
-        info_revista = obtener_info_revista(titulo)
-        if info_revista:
-            revistas_scrapeadas[titulo_lower] = info_revista
+    except Exception as e:
+        print(f"Error con {nombre_revista}: {str(e)}")
 
-        # Guardar cada vez que obtenemos nueva info (por si se interrumpe)
-        guardar_catalogo_scrapeado(revistas_scrapeadas)
+def leer_catalogo_general():
+    ruta = r'C:\Users\valeu\Downloads\Proyectofinal-main (1)\Proyectofinal-main\Proyecto_DS\datos\json\catalogo_general.json'
+    if not os.path.exists(ruta):
+        print("Archivo de catálogo general no encontrado.")
+        return []
+    with open(ruta, 'r', encoding='utf-8') as file:
+        return json.load(file)
 
-        # Esperar para no saturar el servidor
-        time.sleep(DELAY_SEGUNDOS)
+def obtener_informacion_de_revistas():
+    catalogo = leer_catalogo_general()
+    if not catalogo:
+        print("Catálogo vacío o no válido.")
+        return
 
-if __name__ == "__main__":
-    scrappear_revistas()
+    catalogo_extraido = []
+
+    for revista in catalogo:
+        obtener_info_revista(revista, catalogo_extraido)
+        time.sleep(2)
+
+    with open('catalogo_extraido.json', 'w', encoding='utf-8') as json_file:
+        json.dump(catalogo_extraido, json_file, indent=4, ensure_ascii=False)
+
+    print("\n✅ Información guardada en catalogo_extraido.json")
+
+obtener_informacion_de_revistas()
