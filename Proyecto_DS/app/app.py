@@ -1,5 +1,9 @@
-from flask import render_template
-from app import app
+from flask import Flask, render_template
+import webbrowser
+import threading
+
+app = Flask(__name__)
+app.debug = True
 
 @app.route('/')
 def index():
@@ -9,20 +13,17 @@ def index():
 def areas():
     return render_template('areas.html')
 
+@app.route('/base')
+def base():
+    return render_template('base.html')
+
 @app.route('/catalogos')
 def catalogos():
     return render_template('catalogos.html')
 
-@app.route('/explorar')
-def explorar():
-    return render_template('explorar.html')
+def open_browser():
+    webbrowser.open_new('http://127.0.0.1:5000/')
 
-@app.route('/busqueda')
-def busqueda():
-    return render_template('busqueda.html')
-
-@app.route('/creditos')
-def creditos():
-    return render_template('creditos.html')
-
-
+if __name__ == '__main__':
+    threading.Timer(1.0, open_browser).start()
+    app.run()
